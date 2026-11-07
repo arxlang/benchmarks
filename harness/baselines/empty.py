@@ -1,0 +1,1 @@
+# Intentionally empty: measures interpreter start-up.
