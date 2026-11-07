@@ -2,16 +2,40 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef CHECKED
+static long long chk_add(long long a, long long b) {
+    long long r;
+    if (__builtin_add_overflow(a, b, &r)) {
+        fprintf(stderr, "integer overflow\n");
+        exit(1);
+    }
+    return r;
+}
+static long long chk_sub(long long a, long long b) {
+    long long r;
+    if (__builtin_sub_overflow(a, b, &r)) {
+        fprintf(stderr, "integer overflow\n");
+        exit(1);
+    }
+    return r;
+}
+#define ADD(a, b) chk_add((a), (b))
+#define SUB(a, b) chk_sub((a), (b))
+#else
+#define ADD(a, b) ((a) + (b))
+#define SUB(a, b) ((a) - (b))
+#endif
+
 static long long fib_rec(long long n) {
-    return n <= 1 ? n : fib_rec(n - 1) + fib_rec(n - 2);
+    return n <= 1 ? n : ADD(fib_rec(SUB(n, 1)), fib_rec(SUB(n, 2)));
 }
 
 static long long fib_iter(long long n) {
     long long a = 0, b = 1;
-    for (long long i = 0; i < n; i++) {
+    for (long long i = 0; i < n; i = ADD(i, 1)) {
         long long t = a;
         a = b;
-        b = t + b;
+        b = ADD(t, b);
     }
     return a;
 }
@@ -38,7 +62,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     long long total = 0;
-    for (long long k = 0; k < n; k++) total += fib_iter(30 + k % 10);
+    for (long long k = 0; k < n; k = ADD(k, 1)) total = ADD(total, fib_iter(ADD(30, k % 10)));
     printf("%lld\n", total);
     return 0;
 }

@@ -78,10 +78,12 @@ def build_c(src: Path, out: Path) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     cmds = {}
     for opt in C_OPT_LEVELS:
-        binary = out / f"c-{opt}"
-        _build_once(("c", str(src), str(binary)), ["clang", f"-{opt}", "-o", str(binary), str(src)],
-                    f"clang -{opt}")
-        cmds[f"c-{opt}"] = [str(binary)]
+        for checked in (False, True):
+            label = f"c-{opt}" + ("-checked" if checked else "")
+            binary = out / label
+            cmd = ["clang", f"-{opt}", *(["-DCHECKED"] if checked else []), "-o", str(binary), str(src)]
+            _build_once(("c", str(src), str(binary)), cmd, f"clang {label}")
+            cmds[label] = [str(binary)]
     return cmds
 
 
@@ -106,8 +108,10 @@ LANGS = {
 
 
 def family(label: str) -> str:
-    """Baseline key for a result label (arx-while and arx-range share the arx baseline)."""
-    return "arx" if label.startswith("arx") else label
+    """Baseline key for a result label (arx-* share the arx baseline; -checked uses its sibling's)."""
+    if label.startswith("arx"):
+        return "arx"
+    return label.removesuffix("-checked")
 
 
 def select_langs(spec: str | None) -> dict:
@@ -212,7 +216,11 @@ def baseline_commands(langs: dict) -> dict:
     out = BUILD / "_baseline"
     cmds = {}
     for lang in langs.values():
-        cmds.update(lang.build(BASELINES / lang.baseline, out))
+        cmds.update({
+            k: v
+            for k, v in lang.build(BASELINES / lang.baseline, out).items()
+            if not k.endswith("-checked")
+        })
     return cmds
 
 
