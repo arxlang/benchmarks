@@ -2,12 +2,13 @@
 """Generic harness for the Arx benchmarks repository.
 
   python3 harness/bench.py list
-  python3 harness/bench.py check  [SUITE ...] [--case ID]
-  python3 harness/bench.py run    [SUITE ...] [--case ID] [--quick]
+  python3 harness/bench.py check  [SUITE ...] [--case ID] [--lang L,L]
+  python3 harness/bench.py run    [SUITE ...] [--case ID] [--lang L,L] [--quick]
   python3 harness/bench.py report [RESULTS_DIR]
 
-A suite is a folder in suites/ containing benchmark.toml. Requires Python >= 3.11,
-hyperfine, clang and arx on PATH.
+A suite is a folder in suites/ containing benchmark.toml. Languages are defined in the LANGS
+registry below; a language is used when its toolchain is installed. Requires Python >= 3.11,
+hyperfine and the toolchains of the languages being run.
 """
 from __future__ import annotations
 
@@ -17,18 +18,22 @@ import os
 import platform
 import shlex
 import shutil
-import statistics
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITES = ROOT / "suites"
 BUILD = ROOT / "build"
 RESULTS = ROOT / "results"
+BASELINES = ROOT / "harness" / "baselines"
 C_OPT_LEVELS = ("O0", "O2")
+
+_built: set = set()
 
 
 def sh(cmd: list[str]) -> str:
@@ -51,6 +56,84 @@ def require(*tools: str) -> None:
         sys.exit("missing required tools on PATH: " + ", ".join(missing))
 
 
+# ----------------------------------------------------------------------------- languages
+# build(src, outdir) compiles if needed and returns {label: argv}. Case arguments are appended
+# to argv by the harness (Arx programs take none).
+
+def _build_once(key: tuple, cmd: list[str], what: str) -> None:
+    if key not in _built:
+        run_checked(cmd, what)
+        _built.add(key)
+
+
+def build_arx(src: Path, out: Path) -> dict:
+    out.mkdir(parents=True, exist_ok=True)
+    binary = out / f"arx-{src.stem}"
+    _build_once(("arx", str(src), str(binary)), ["arx", str(src), "--output-file", str(binary)],
+                f"arx compile {src.name}")
+    return {"arx": [str(binary)]}
+
+
+def build_c(src: Path, out: Path) -> dict:
+    out.mkdir(parents=True, exist_ok=True)
+    cmds = {}
+    for opt in C_OPT_LEVELS:
+        binary = out / f"c-{opt}"
+        _build_once(("c", str(src), str(binary)), ["clang", f"-{opt}", "-o", str(binary), str(src)],
+                    f"clang -{opt}")
+        cmds[f"c-{opt}"] = [str(binary)]
+    return cmds
+
+
+def build_python(src: Path, out: Path) -> dict:
+    return {"python": [sys.executable, str(src)]}
+
+
+@dataclass(frozen=True)
+class Lang:
+    name: str
+    tools: tuple
+    version_cmd: tuple
+    build: Callable[[Path, Path], dict]
+    baseline: str  # file in harness/baselines/
+
+
+LANGS = {
+    "arx": Lang("arx", ("arx",), ("arx", "--version"), build_arx, "empty.x"),
+    "c": Lang("c", ("clang",), ("clang", "--version"), build_c, "empty.c"),
+    "python": Lang("python", (), (sys.executable, "--version"), build_python, "empty.py"),
+}
+
+
+def family(label: str) -> str:
+    """Baseline key for a result label (arx-while and arx-range share the arx baseline)."""
+    return "arx" if label.startswith("arx") else label
+
+
+def select_langs(spec: str | None) -> dict:
+    wanted = [s.strip() for s in spec.split(",")] if spec else list(LANGS)
+    unknown = [w for w in wanted if w not in LANGS]
+    if unknown:
+        sys.exit(f"unknown language(s): {', '.join(unknown)}; available: {', '.join(LANGS)}")
+    chosen = {}
+    for w in wanted:
+        missing = [t for t in LANGS[w].tools if shutil.which(t) is None]
+        if missing:
+            if spec:
+                sys.exit(f"--lang {w}: missing tools on PATH: {', '.join(missing)}")
+            print(f"SKIP {w}: missing {', '.join(missing)}", file=sys.stderr)
+            continue
+        chosen[w] = LANGS[w]
+    if not chosen:
+        sys.exit("no usable languages")
+    clang_path = shutil.which("clang") or ""
+    if "c" in chosen and sys.platform == "darwin" and any(m in clang_path for m in ("conda", "mamba", "miniforge")):
+        print(f"WARNING: clang is {clang_path}; conda clang failed to link Arx output on macOS "
+              "in testing. Put Apple's /usr/bin/clang first on PATH.", file=sys.stderr)
+    return chosen
+
+
+# ----------------------------------------------------------------------------- suites
 def load_suites(names: list[str]) -> dict:
     found = {}
     for manifest in sorted(SUITES.glob("*/benchmark.toml")):
@@ -73,73 +156,6 @@ def select(suites: dict, case_id: str | None) -> list:
     return plan
 
 
-def cpu_name() -> str:
-    if sys.platform == "darwin":
-        return sh(["sysctl", "-n", "machdep.cpu.brand_string"])
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor()
-
-
-def environment() -> dict:
-    arx_repo = os.environ.get("ARX_REPO")
-    clang_version = sh(["clang", "--version"]).splitlines()
-    now = datetime.now(timezone.utc)
-    return {
-        "date": now.date().isoformat(),
-        "timestamp_utc": now.strftime("%Y-%m-%dT%H%M%SZ"),
-        "arx": sh(["arx", "--version"]),
-        "arx_commit": sh(["git", "-C", arx_repo, "rev-parse", "--short", "HEAD"]) if arx_repo else "",
-        "arx_path": shutil.which("arx"),
-        "clang": clang_version[0] if clang_version else "",
-        "clang_path": shutil.which("clang"),
-        "hyperfine": sh(["hyperfine", "--version"]),
-        "python": platform.python_version(),
-        "os": platform.platform(),
-        "machine": platform.machine(),
-        "cpu": cpu_name(),
-        "cpu_count": os.cpu_count(),
-        "harness_commit": sh(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"]),
-        "harness_dirty": bool(sh(["git", "-C", str(ROOT), "status", "--porcelain"])),
-    }
-
-
-def prepare(plan: list, need_hyperfine: bool) -> None:
-    refs_c = any("c" in s.get("references", {}) for s, _ in plan)
-    needs_arx = any(c.get("arx") for _, c in plan)
-    require(*(["hyperfine"] if need_hyperfine else []),
-            *(["clang"] if refs_c else []), *(["arx"] if needs_arx else []))
-    clang_path = shutil.which("clang") or ""
-    if sys.platform == "darwin" and any(m in clang_path for m in ("conda", "mamba", "miniforge")):
-        print(f"WARNING: clang is {clang_path}; conda clang failed to link Arx output on macOS "
-              "in testing. Put Apple's /usr/bin/clang first on PATH.", file=sys.stderr)
-    built_c = set()
-    built_arx = set()
-    for suite, case in plan:
-        name = suite["dir"].name
-        out = BUILD / name
-        out.mkdir(parents=True, exist_ok=True)
-        if "c" in suite.get("references", {}) and name not in built_c:
-            for opt in C_OPT_LEVELS:
-                run_checked(["clang", f"-{opt}", "-o", str(out / f"c-{opt}"),
-                             str(suite["dir"] / suite["references"]["c"])], f"clang -{opt}")
-            built_c.add(name)
-        for src in dict.fromkeys(case.get("arx", {}).values()):
-            if (name, src) in built_arx:
-                continue
-            run_checked(["arx", str(suite["dir"] / src), "--output-file",
-                         str(out / arx_bin(src))], f"arx compile {src}")
-            built_arx.add((name, src))
-
-
-def arx_bin(src: str) -> str:
-    return "arx-" + Path(src).stem
-
-
 def case_dir(suite: dict, case: dict) -> Path:
     """Working directory for a case; holds input.txt when the case defines `input`."""
     d = BUILD / suite["dir"].name / "cases" / case["id"]
@@ -149,17 +165,34 @@ def case_dir(suite: dict, case: dict) -> Path:
     return d
 
 
-def commands(suite: dict, case: dict) -> dict:
+def commands(suite: dict, case: dict, langs: dict) -> dict:
     out = BUILD / suite["dir"].name
     refs = suite.get("references", {})
     args = [str(a) for a in case.get("args", [])]
-    cmds = {label: [str(out / arx_bin(src))] for label, src in case.get("arx", {}).items()}
-    if "c" in refs:
-        for opt in C_OPT_LEVELS:
-            cmds[f"c-{opt}"] = [str(out / f"c-{opt}"), *args]
-    if "python" in refs:
-        cmds["python"] = [sys.executable, str(suite["dir"] / refs["python"]), *args]
+    cmds = {}
+    if "arx" in langs:
+        for label, src in case.get("arx", {}).items():
+            cmds[label] = langs["arx"].build(suite["dir"] / src, out)["arx"]
+    for name, lang in langs.items():
+        if name == "arx" or name not in refs:
+            continue
+        for label, argv in lang.build(suite["dir"] / refs[name], out).items():
+            cmds[label] = [*argv, *args]
     return cmds
+
+
+def prepare(plan: list, langs: dict) -> list:
+    prepared = []
+    for suite, case in plan:
+        cmds = commands(suite, case, langs)
+        if not cmds:
+            print(f"SKIP {suite['dir'].name}/{case['id']}: no implementation for the selected languages",
+                  file=sys.stderr)
+            continue
+        prepared.append((suite, case, cmds))
+    if not prepared:
+        sys.exit("nothing to run")
+    return prepared
 
 
 def verify(suite: dict, case: dict, cmds: dict) -> None:
@@ -174,7 +207,83 @@ def verify(suite: dict, case: dict, cmds: dict) -> None:
     print(f"OK  {suite['dir'].name}/{case['id']}: {', '.join(cmds)}")
 
 
+# ----------------------------------------------------------------------------- baseline
+def baseline_commands(langs: dict) -> dict:
+    out = BUILD / "_baseline"
+    cmds = {}
+    for lang in langs.values():
+        cmds.update(lang.build(BASELINES / lang.baseline, out))
+    return cmds
+
+
+def baseline_dir() -> Path:
+    d = BUILD / "_baseline" / "cwd"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def verify_baseline(cmds: dict) -> None:
+    for label, cmd in cmds.items():
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=baseline_dir())
+        if r.returncode != 0 or r.stdout.strip():
+            sys.exit(f"baseline {label} misbehaved: exit {r.returncode}, stdout {r.stdout!r}\n{r.stderr.strip()}")
+    print(f"OK  baseline: {', '.join(cmds)}")
+
+
+# ----------------------------------------------------------------------------- environment
+def cpu_name() -> str:
+    if sys.platform == "darwin":
+        return sh(["sysctl", "-n", "machdep.cpu.brand_string"])
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor()
+
+
+def environment(langs: dict) -> dict:
+    arx_repo = os.environ.get("ARX_REPO")
+    clang_version = sh(["clang", "--version"]).splitlines()
+    now = datetime.now(timezone.utc)
+    versions = {}
+    for name, lang in langs.items():
+        lines = sh(list(lang.version_cmd)).splitlines()
+        versions[name] = lines[0] if lines else ""
+    return {
+        "date": now.date().isoformat(),
+        "timestamp_utc": now.strftime("%Y-%m-%dT%H%M%SZ"),
+        "arx": sh(["arx", "--version"]),
+        "arx_commit": sh(["git", "-C", arx_repo, "rev-parse", "--short", "HEAD"]) if arx_repo else "",
+        "arx_path": shutil.which("arx"),
+        "clang": clang_version[0] if clang_version else "",
+        "clang_path": shutil.which("clang"),
+        "languages": versions,
+        "hyperfine": sh(["hyperfine", "--version"]),
+        "python": platform.python_version(),
+        "os": platform.platform(),
+        "machine": platform.machine(),
+        "cpu": cpu_name(),
+        "cpu_count": os.cpu_count(),
+        "harness_commit": sh(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"]),
+        "harness_dirty": bool(sh(["git", "-C", str(ROOT), "status", "--porcelain"])),
+    }
+
+
+# ----------------------------------------------------------------------------- commands
+def hyperfine(cmds: dict, runs: int, warmup: int, export: Path, cwd: Path) -> None:
+    hf = ["hyperfine", "-N", "--warmup", str(warmup), "--runs", str(runs), "--export-json", str(export)]
+    for label, cmd in cmds.items():
+        hf += ["--command-name", label, shlex.join(cmd)]
+    subprocess.run(hf, check=True, cwd=cwd)
+
+
 def cmd_list(args) -> None:
+    print("languages:")
+    for name, lang in LANGS.items():
+        missing = [t for t in lang.tools if shutil.which(t) is None]
+        print(f"  - {name}: {'missing ' + ', '.join(missing) if missing else 'available'}")
     for name, s in load_suites([]).items():
         print(f"{name}: {s.get('description', '')}")
         for c in s["case"]:
@@ -183,32 +292,50 @@ def cmd_list(args) -> None:
 
 def cmd_check(args) -> None:
     plan = select(load_suites(args.suites), args.case)
-    prepare(plan, need_hyperfine=False)
-    for suite, case in plan:
-        verify(suite, case, commands(suite, case))
+    langs = select_langs(args.lang)
+    prepared = prepare(plan, langs)
+    for suite, case, cmds in prepared:
+        verify(suite, case, cmds)
+    verify_baseline(baseline_commands(langs))
 
 
 def cmd_run(args) -> None:
     plan = select(load_suites(args.suites), args.case)
-    prepare(plan, need_hyperfine=True)
-    env = environment()
+    langs = select_langs(args.lang)
+    require("hyperfine")
+    prepared = prepare(plan, langs)
+    base_cmds = baseline_commands(langs)
+    verify_baseline(base_cmds)
+    env = environment(langs)
     base = BUILD / "quick-results" if args.quick else RESULTS
-    outdir = base / f"{env['timestamp_utc']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx']}"
+    outdir = base / f"{env['timestamp_utc']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx'] or 'none'}"
     outdir.mkdir(parents=True, exist_ok=False)  # never overwrite an earlier run
     (outdir / "environment.json").write_text(json.dumps(env, indent=2) + "\n")
-    for suite, case in plan:
-        cmds = commands(suite, case)
+
+    print("\n== baseline (empty programs) ==", flush=True)
+    hyperfine(base_cmds, 3 if args.quick else 10, 1 if args.quick else 2, outdir / "_baseline.json", baseline_dir())
+
+    for suite, case, cmds in prepared:
         verify(suite, case, cmds)
         sdir = outdir / suite["dir"].name
         sdir.mkdir(exist_ok=True)
         runs, warmup = (3, 1) if args.quick else (case.get("runs", 10), case.get("warmup", 2))
-        hf = ["hyperfine", "-N", "--warmup", str(warmup), "--runs", str(runs),
-              "--export-json", str(sdir / f"{case['id']}.json")]
-        for label, cmd in cmds.items():
-            hf += ["--command-name", label, shlex.join(cmd)]
         print(f"\n== {suite['dir'].name}/{case['id']} ==", flush=True)
-        subprocess.run(hf, check=True, cwd=case_dir(suite, case))
+        hyperfine(cmds, runs, warmup, sdir / f"{case['id']}.json", case_dir(suite, case))
     print(f"\nresults written to {outdir}")
+
+
+def parse_row(r: dict) -> tuple:
+    name = r.get("name") or r["command"]
+    if "summary" in r:  # hyperfine 2.x
+        tw = r["summary"]["time_wall_clock"]
+        med, mn, sd = tw["median"], tw["min"], tw.get("stddev") or 0.0
+        mem = r["summary"].get("memory_peak_resident", {}).get("median")
+    else:  # hyperfine 1.x
+        med, mn, sd = r["median"], r["min"], r.get("stddev") or 0.0
+        mem = r.get("memory_usage_byte")
+    mib = mem / (1024 * 1024) if isinstance(mem, (int, float)) else None
+    return name, med, mn, sd, mib
 
 
 def cmd_report(args) -> None:
@@ -220,35 +347,40 @@ def cmd_report(args) -> None:
             sys.exit("no results found")
         d = runs[-1]
     env = json.loads((d / "environment.json").read_text())
+    langs = env.get("languages")
+    extra = " | " + ", ".join(f"{k}: {v}" for k, v in langs.items()) if langs else ""
     print(f"Environment: {env['cpu']} | {env['os']} | arx {env['arx']} {env['arx_commit']} | "
-          f"{env['clang']} | {env['hyperfine']} | Python {env['python']}\n")
+          f"{env['clang']} | {env['hyperfine']} | Python {env['python']}{extra}\n")
+
+    base = {}
+    bf = d / "_baseline.json"
+    if bf.exists():
+        for row in json.loads(bf.read_text())["results"]:
+            name, med, *_ = parse_row(row)
+            base[name] = med
+
     for sdir in sorted(p for p in d.iterdir() if p.is_dir()):
         print(f"#### {sdir.name}\n")
         for f in sorted(sdir.glob("*.json")):
-            rows = json.loads(f.read_text())["results"]
-            parsed = []
-            for r in rows:
-                name = r.get("name") or r["command"]
-                if "summary" in r:  # Hyperfine 2.0 (schema_version 2)
-                    tw = r["summary"]["time_wall_clock"]
-                    med, mn, sd = tw["median"], tw["min"], (tw.get("stddev") or 0.0)
-                    mem = r["summary"].get("memory_peak_resident", {}).get("median")
-                else:  # Hyperfine 1.x (schema_version 1)
-                    med, mn, sd = r["median"], r["min"], (r.get("stddev") or 0.0)
-                    mem = r.get("memory_usage_byte")
-                mem_mib = (mem / (1024 * 1024)) if isinstance(mem, (int, float)) else None
-                parsed.append((name, med, mn, sd, mem_mib))
+            parsed = [parse_row(r) for r in json.loads(f.read_text())["results"]]
             best = min(x[1] for x in parsed)
             has_mem = any(x[4] is not None for x in parsed)
+            head = ["implementation", "median (s)", "min (s)", "stddev (s)"]
             if has_mem:
-                print(f"**{f.stem}**\n\n| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | vs fastest |\n|---|---|---|---|---|---|")
-                for name, med, mn, sd, mem_mib in parsed:
-                    m_str = f"{mem_mib:.1f}" if mem_mib is not None else "-"
-                    print(f"| {name} | {med:.4f} | {mn:.4f} | {sd:.4f} | {m_str} | {med / best:.1f}x |")
-            else:
-                print(f"**{f.stem}**\n\n| implementation | median (s) | min (s) | stddev (s) | vs fastest |\n|---|---|---|---|---|")
-                for name, med, mn, sd, _ in parsed:
-                    print(f"| {name} | {med:.4f} | {mn:.4f} | {sd:.4f} | {med / best:.1f}x |")
+                head.append("memory (MiB)")
+            if base:
+                head += ["startup (s)", "net (s)"]
+            head.append("vs fastest (wall)")
+            print(f"**{f.stem}**\n\n| " + " | ".join(head) + " |\n|" + "---|" * len(head))
+            for name, med, mn, sd, mib in parsed:
+                row = [name, f"{med:.4f}", f"{mn:.4f}", f"{sd:.4f}"]
+                if has_mem:
+                    row.append(f"{mib:.1f}" if mib is not None else "-")
+                if base:
+                    b = base.get(family(name))
+                    row += [f"{b:.4f}", f"{max(med - b, 0.0):.4f}"] if b is not None else ["-", "-"]
+                row.append(f"{med / best:.1f}x")
+                print("| " + " | ".join(row) + " |")
             print()
 
 
@@ -260,6 +392,7 @@ def main() -> None:
         s = sub.add_parser(name)
         s.add_argument("suites", nargs="*")
         s.add_argument("--case")
+        s.add_argument("--lang", help="comma-separated languages (default: all installed)")
         if name == "run":
             s.add_argument("--quick", action="store_true", help="3 runs, 1 warm-up; writes to build/quick-results")
         s.set_defaults(fn=fn)
