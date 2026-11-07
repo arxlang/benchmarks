@@ -1,35 +1,38 @@
 name = "fibonacci"
 description = "Function-call overhead, integer loops and range iteration"
 
-# Reference implementations; each receives the case's `args`.
+# Reference implementations receive `args`. Every implementation reads n from input.txt.
 [references]
 c = "c/fib.c"
 python = "python/fib.py"
 
 [[case]]
 id = "recursive_35"
-args = ["recursive", "35"]
+args = ["recursive"]
+input = "35"
 expected = "9227465"
 runs = 10
 warmup = 2
 [case.arx]
-arx = "arx/recursive_35.x"
+arx = "arx/recursive.x"
 
 [[case]]
 id = "recursive_40"
-args = ["recursive", "40"]
+args = ["recursive"]
+input = "40"
 expected = "102334155"
 runs = 5
 warmup = 1
 [case.arx]
-arx = "arx/recursive_40.x"
+arx = "arx/recursive.x"
 
 [[case]]
 id = "iterative_1m"
-args = ["iterative", "1000000"]
+args = ["iterative"]
+input = "1000000"
 expected = "16423387200000"
 runs = 10
 warmup = 2
 [case.arx]
-arx-while = "arx/iterative_while_1m.x"
-arx-range = "arx/iterative_range_1m.x"
+arx-while = "arx/iterative_while.x"
+arx-range = "arx/iterative_range.x"

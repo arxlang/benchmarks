@@ -16,12 +16,23 @@ static long long fib_iter(long long n) {
     return a;
 }
 
+static long long read_n(void) {
+    FILE *f = fopen("input.txt", "r");
+    long long n;
+    if (!f || fscanf(f, "%lld", &n) != 1) {
+        fprintf(stderr, "cannot read n from input.txt\n");
+        exit(2);
+    }
+    fclose(f);
+    return n;
+}
+
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "usage: fib recursive|iterative N\n");
+    if (argc != 2) {
+        fprintf(stderr, "usage: fib recursive|iterative (reads n from input.txt)\n");
         return 2;
     }
-    long long n = atoll(argv[2]);
+    long long n = read_n();
     if (strcmp(argv[1], "recursive") == 0) {
         printf("%lld\n", fib_rec(n));
         return 0;

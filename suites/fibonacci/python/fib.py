@@ -12,7 +12,9 @@ def fib_iter(n):
     return a
 
 
-mode, n = sys.argv[1], int(sys.argv[2])
+mode = sys.argv[1]
+with open("input.txt") as f:
+    n = int(f.read())
 if mode == "recursive":
     print(fib_recursive(n))
 else:
