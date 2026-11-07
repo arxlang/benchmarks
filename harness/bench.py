@@ -21,7 +21,7 @@ import statistics
 import subprocess
 import sys
 import tomllib
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -88,8 +88,10 @@ def cpu_name() -> str:
 def environment() -> dict:
     arx_repo = os.environ.get("ARX_REPO")
     clang_version = sh(["clang", "--version"]).splitlines()
+    now = datetime.now(timezone.utc)
     return {
-        "date": date.today().isoformat(),
+        "date": now.date().isoformat(),
+        "timestamp_utc": now.strftime("%Y-%m-%dT%H%M%SZ"),
         "arx": sh(["arx", "--version"]),
         "arx_commit": sh(["git", "-C", arx_repo, "rev-parse", "--short", "HEAD"]) if arx_repo else "",
         "arx_path": shutil.which("arx"),
@@ -116,6 +118,7 @@ def prepare(plan: list, need_hyperfine: bool) -> None:
         print(f"WARNING: clang is {clang_path}; conda clang failed to link Arx output on macOS "
               "in testing. Put Apple's /usr/bin/clang first on PATH.", file=sys.stderr)
     built_c = set()
+    built_arx = set()
     for suite, case in plan:
         name = suite["dir"].name
         out = BUILD / name
@@ -125,16 +128,32 @@ def prepare(plan: list, need_hyperfine: bool) -> None:
                 run_checked(["clang", f"-{opt}", "-o", str(out / f"c-{opt}"),
                              str(suite["dir"] / suite["references"]["c"])], f"clang -{opt}")
             built_c.add(name)
-        for label, src in case.get("arx", {}).items():
+        for src in dict.fromkeys(case.get("arx", {}).values()):
+            if (name, src) in built_arx:
+                continue
             run_checked(["arx", str(suite["dir"] / src), "--output-file",
-                         str(out / f"{case['id']}.{label}")], f"arx compile {src}")
+                         str(out / arx_bin(src))], f"arx compile {src}")
+            built_arx.add((name, src))
+
+
+def arx_bin(src: str) -> str:
+    return "arx-" + Path(src).stem
+
+
+def case_dir(suite: dict, case: dict) -> Path:
+    """Working directory for a case; holds input.txt when the case defines `input`."""
+    d = BUILD / suite["dir"].name / "cases" / case["id"]
+    d.mkdir(parents=True, exist_ok=True)
+    if "input" in case:
+        (d / "input.txt").write_text(str(case["input"]) + "\n")
+    return d
 
 
 def commands(suite: dict, case: dict) -> dict:
     out = BUILD / suite["dir"].name
     refs = suite.get("references", {})
     args = [str(a) for a in case.get("args", [])]
-    cmds = {label: [str(out / f"{case['id']}.{label}")] for label in case.get("arx", {})}
+    cmds = {label: [str(out / arx_bin(src))] for label, src in case.get("arx", {}).items()}
     if "c" in refs:
         for opt in C_OPT_LEVELS:
             cmds[f"c-{opt}"] = [str(out / f"c-{opt}"), *args]
@@ -145,8 +164,9 @@ def commands(suite: dict, case: dict) -> dict:
 
 def verify(suite: dict, case: dict, cmds: dict) -> None:
     # Also serves as the first launch of each fresh binary (macOS checks new executables).
+    cwd = case_dir(suite, case)
     for label, cmd in cmds.items():
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
         got = r.stdout.strip()
         if r.returncode != 0 or got != case["expected"]:
             sys.exit(f"WRONG OUTPUT [{suite['dir'].name}/{case['id']}] {label}: "
@@ -158,7 +178,7 @@ def cmd_list(args) -> None:
     for name, s in load_suites([]).items():
         print(f"{name}: {s.get('description', '')}")
         for c in s["case"]:
-            print(f"  - {c['id']} (args {c.get('args', [])}, expected {c['expected']})")
+            print(f"  - {c['id']} (args {c.get('args', [])}, input {c.get('input', '-')}, expected {c['expected']})")
 
 
 def cmd_check(args) -> None:
@@ -173,8 +193,8 @@ def cmd_run(args) -> None:
     prepare(plan, need_hyperfine=True)
     env = environment()
     base = BUILD / "quick-results" if args.quick else RESULTS
-    outdir = base / f"{env['date']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx']}"
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = base / f"{env['timestamp_utc']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx']}"
+    outdir.mkdir(parents=True, exist_ok=False)  # never overwrite an earlier run
     (outdir / "environment.json").write_text(json.dumps(env, indent=2) + "\n")
     for suite, case in plan:
         cmds = commands(suite, case)
@@ -187,7 +207,7 @@ def cmd_run(args) -> None:
         for label, cmd in cmds.items():
             hf += ["--command-name", label, shlex.join(cmd)]
         print(f"\n== {suite['dir'].name}/{case['id']} ==", flush=True)
-        subprocess.run(hf, check=True)
+        subprocess.run(hf, check=True, cwd=case_dir(suite, case))
     print(f"\nresults written to {outdir}")
 
 
