@@ -3,20 +3,18 @@
 #include <string.h>
 
 #ifdef CHECKED
-static long long chk_add(long long a, long long b) {
+__attribute__((noinline, cold, noreturn)) static void overflow_fail(void) {
+    fprintf(stderr, "integer overflow\n");
+    exit(1);
+}
+static inline __attribute__((always_inline)) long long chk_add(long long a, long long b) {
     long long r;
-    if (__builtin_add_overflow(a, b, &r)) {
-        fprintf(stderr, "integer overflow\n");
-        exit(1);
-    }
+    if (__builtin_add_overflow(a, b, &r)) overflow_fail();
     return r;
 }
-static long long chk_sub(long long a, long long b) {
+static inline __attribute__((always_inline)) long long chk_sub(long long a, long long b) {
     long long r;
-    if (__builtin_sub_overflow(a, b, &r)) {
-        fprintf(stderr, "integer overflow\n");
-        exit(1);
-    }
+    if (__builtin_sub_overflow(a, b, &r)) overflow_fail();
     return r;
 }
 #define ADD(a, b) chk_add((a), (b))
