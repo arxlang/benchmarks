@@ -5,6 +5,12 @@ description = "Function-call overhead, integer loops and range iteration"
 [references]
 c = "c/fib.c"
 python = "python/fib.py"
+rust = "rust/fib.rs"
+go = "go/fib.go"
+lua = "lua/fib.lua"
+java = "java/Fib.java"
+julia = "julia/fib.jl"
+numba = "numba/fib.py"
 
 [[case]]
 id = "recursive_35"

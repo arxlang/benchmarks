@@ -1,0 +1,1 @@
+import numba  # noqa: F401  (measures interpreter start-up plus the numba import)

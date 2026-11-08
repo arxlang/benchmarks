@@ -32,6 +32,8 @@ BUILD = ROOT / "build"
 RESULTS = ROOT / "results"
 BASELINES = ROOT / "harness" / "baselines"
 C_OPT_LEVELS = ("O0", "O2")
+RUST_OPT_LEVELS = ("0", "2")
+NUMBA_PY = os.environ.get("NUMBA_PYTHON", str(Path.home() / ".venvs" / "numba" / "bin" / "python"))
 
 _built: set = set()
 
@@ -90,6 +92,48 @@ def build_c(src: Path, out: Path) -> dict:
 def build_python(src: Path, out: Path) -> dict:
     return {"python": [sys.executable, str(src)]}
 
+def build_rust(src: Path, out: Path) -> dict:
+    out.mkdir(parents=True, exist_ok=True)
+    cmds = {}
+    for opt in RUST_OPT_LEVELS:
+        for checked in (False, True):
+            label = f"rust-O{opt}" + ("-checked" if checked else "")
+            binary = out / label
+            cmd = ["rustc", "-C", f"opt-level={opt}", "-C", f"overflow-checks={'on' if checked else 'off'}",
+                   "-C", "debuginfo=0", "-o", str(binary), str(src)]
+            _build_once(("rust", str(src), str(binary)), cmd, f"rustc {label}")
+            cmds[label] = [str(binary)]
+    return cmds
+
+def build_go(src: Path, out: Path) -> dict:
+    out.mkdir(parents=True, exist_ok=True)
+    binary = out / f"go-{src.stem}"
+    _build_once(("go", str(src), str(binary)), ["go", "build", "-o", str(binary), str(src)],
+                f"go build {src.name}")
+    return {"go": [str(binary)]}
+
+
+def build_lua(src: Path, out: Path) -> dict:
+    return {"lua": ["lua", str(src)]}
+
+
+def build_java(src: Path, out: Path) -> dict:
+    classes = out / f"java-{src.stem}"
+    classes.mkdir(parents=True, exist_ok=True)
+    _build_once(("java", str(src), str(classes)), ["javac", "-d", str(classes), str(src)],
+                f"javac {src.name}")
+    base = ["java", "-cp", str(classes), src.stem]
+    return {"java": base, "java-checked": ["java", "-Dchecked=true", "-cp", str(classes), src.stem]}
+
+
+def build_julia(src: Path, out: Path) -> dict:
+    base = ["julia", "--startup-file=no", "-O2", str(src)]
+    return {"julia": base, "julia-checked": [*base, "--checked"]}
+
+
+def build_numba(src: Path, out: Path) -> dict:
+    return {"numba": [NUMBA_PY, str(src)]}
+
 
 @dataclass(frozen=True)
 class Lang:
@@ -104,6 +148,14 @@ LANGS = {
     "arx": Lang("arx", ("arx",), ("arx", "--version"), build_arx, "empty.x"),
     "c": Lang("c", ("clang",), ("clang", "--version"), build_c, "empty.c"),
     "python": Lang("python", (), (sys.executable, "--version"), build_python, "empty.py"),
+    "rust": Lang("rust", ("rustc",), ("rustc", "--version"), build_rust, "empty.rs"),
+    "go": Lang("go", ("go",), ("go", "version"), build_go, "empty.go"),
+    "lua": Lang("lua", ("lua",), ("lua", "-v"), build_lua, "empty.lua"),
+    "java": Lang("java", ("javac", "java"), ("java", "-version"), build_java, "Empty.java"),
+    "julia": Lang("julia", ("julia",), ("julia", "--version"), build_julia, "empty.jl"),
+    "numba": Lang("numba", (NUMBA_PY,), (NUMBA_PY, "-c",
+                  "import sys, numba; print('numba', numba.__version__, '(Python', sys.version.split()[0] + ')')"),
+                  build_numba, "empty_numba.py"),
 }
 
 
