@@ -16,11 +16,24 @@ integer addition. It has two Arx variants:
 
 ## Implementations
 
-| Label | Source | Build |
-|---|---|---|
-| `arx` / `arx-while` / `arx-range` | `arx/*.x` | `arx <file> --output-file <bin>` |
-| `c-O0`, `c-O2` | `c/fib.c` | `clang -O0` / `clang -O2` |
-| `python` | `python/fib.py` | run with the harness's Python |
+| Label | Source | Build and run | Optimization | Integer overflow |
+|---|---|---|---|---|
+| `arx`, `arx-while`, `arx-range` | `arx/*.x` | `arx <file> --output-file <bin>` | no IR passes (see below) | checked, raises |
+| `c-O0`, `c-O2` | `c/fib.c` | `clang -O0` / `-O2` | as named | wraps (UB) |
+| `c-O0-checked`, `c-O2-checked` | `c/fib.c` | `clang -DCHECKED` | as named | checked, exits 1 |
+| `rust-O0`, `rust-O2` | `rust/fib.rs` | `rustc -C opt-level=0/2 -C overflow-checks=off` | as named | wraps |
+| `rust-O0-checked`, `rust-O2-checked` | `rust/fib.rs` | `rustc ... -C overflow-checks=on` | as named | panics, exit 101 |
+| `go` | `go/fib.go` | `go build` | always optimized, no level flag | wraps |
+| `lua` | `lua/fib.lua` | `lua` (PUC-Rio 5.5, not LuaJIT) | interpreter | wraps |
+| `java` | `java/Fib.java` | `javac`, then `java` | JIT, default flags | wraps |
+| `java-checked` | `java/Fib.java` | `java -Dchecked=true` | JIT, default flags | `Math.addExact`/`subtractExact` |
+| `julia` | `julia/fib.jl` | `julia --startup-file=no -O2` | JIT | wraps |
+| `julia-checked` | `julia/fib.jl` | same, with `--checked` | JIT | `Base.Checked` |
+| `numba` | `numba/fib.py` | `@njit` with explicit signature, `cache=False` | JIT | wraps |
+| `python` | `python/fib.py` | CPython | interpreter | unbounded integers |
+
+Checked variants cover the operations Arx checks: every `+`, `-` and loop increment.
+Toolchain versions are recorded in `environment.json` for each run.
 
 ## Input
 
@@ -63,23 +76,23 @@ open a PR adding the new directory.
 
 ## Fairness notes
 
-**Optimization.** Arx 1.27.0 (`5ff7e9db`) runs no LLVM IR optimization passes on generated code.
-The compiler calls `create_target_machine(codemodel="small", reloc="pic")` without an `opt`
-argument (`packages/irx/src/irx/builder/core.py`, lines 554-559), so llvmlite's default
-code-generation level (`opt=2`) applies. The module is then passed directly to `emit_object`
-(`packages/irx/src/irx/builder/backend.py`, line 193), and `irx` contains no pass-manager
-invocation. The emitted IR for `fib_recursive` is unoptimized (`alloca`/`load`/`store`, no `phi`).
-The `c-O0` and `c-O2` columns bracket Arx's current behaviour.
+**Optimization.** Arx 1.27.1 (`df5fa613`) runs no LLVM IR optimization passes on generated code.
+`_build_from_ir` (`packages/irx/src/irx/builder/backend.py`, line 193) parses the IR text and passes
+it directly to `emit_object`. The target machine is created without an `opt` argument
+(`packages/irx/src/irx/builder/core.py`, lines 554-559), so llvmlite's default code-generation
+level (`opt=2`, llvmlite 0.48.0) applies to instruction selection and register allocation only. No
+pass-manager invocation exists in `packages/irx/src` or `packages/arx/src`. The module emitted for
+`arx/recursive.x` contains 194 `alloca` and no `phi` instructions. The `c-O0` and `c-O2` columns
+bracket Arx's current behaviour.
 
-**Overflow and calling convention.** Arx checks every integer operation and raises on overflow:
-the emitted IR calls `llvm.*.with.overflow` and branches to an exception path. Arx functions also
-return a status code and pass results through a pointer. The C and Python references pay for neither.
+**Overflow and calling convention.** Arx checks every integer operation and raises on overflow
+(`llvm.*.with.overflow` plus a branch to an exception path). Arx functions return a status code and
+pass results through a pointer. Checked variants exist for C, Rust, Java and Julia. Go, Lua and Numba
+have no built-in checked arithmetic and are compared unchecked. CPython integers cannot overflow.
 
-| Implementation | Integer overflow |
-|---|---|
-| Arx | checked, raises |
-| C (`-O0`, `-O2`) | wraps (signed overflow is undefined behaviour) |
-| Python | unbounded integers, nothing to overflow |
+**JIT languages.** Java, Julia and Numba compile or warm up inside the timed process. The `startup`
+column measures only an empty program, so `net` still contains JIT compilation. Numba also includes
+its import time. Treat their `net` values as end-to-end process cost, not steady-state speed.
 
 **Other.** Timings include process start-up. Results come from one machine, so compare ratios, not
 absolute times, across machines.
