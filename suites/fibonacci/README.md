@@ -73,6 +73,9 @@ open a PR adding the new directory.
   baseline as `startup` and the median minus the baseline as `net`.
 - The tables show median, min and standard deviation of wall-clock time, peak memory as reported by
   hyperfine, and a ratio to the fastest implementation in that case.
+- Cases with short run times (`recursive_35`, `iterative_1m`) use 30 timed runs and 5 warm-up runs;
+  `recursive_40` uses 5 runs. Medians are reported because single outlier runs inflate the standard
+  deviation on cases under 100 ms.
 
 ## Fairness notes
 
@@ -99,51 +102,125 @@ absolute times, across machines.
 
 ## Results
 
-Reference run: `results/2026-11-05_darwin-arm64_arx-1.27.0/`
+Run: `results/2026-11-08T002839Z_darwin-arm64_arx-1.27.1/`
 
-> Apple M1 | macOS 27.0.1 (arm64) | Arx 1.27.0 (`5ff7e9db`) | Apple clang 21.0.0 | hyperfine 2.0.0 | Python 3.14.10
+> MacBook Air (Apple M1, 8 cores) | macOS 27.0.1 (arm64) | Arx 1.27.1 (`df5fa613`) | Apple clang 21.0.0 |
+> rustc 1.99.1 | go 1.27.3 | Lua 5.5.1 | Java 25.0.1 | Julia 1.13.3 | Numba 0.68.1 (Python 3.14.10) |
+> CPython 3.14.10 | hyperfine 2.0.0
 
-Workload note: in this run the Arx programs contained `n` as a compile-time constant, while C and
-Python read it from the command line. Runs made with the current harness read `n` from `input.txt`
-in every language and are stored as later directories under [`results/`](../../results/).
-Tables are generated with `python3 harness/bench.py report` from the raw JSON stored next to each
-run's `environment.json`.
+The run used a clean working tree (`harness_dirty: false`). Every implementation read `n` from
+`input.txt`. Tables are generated with `python3 harness/bench.py report` from the raw JSON stored
+next to `environment.json`. `vs fastest (wall)` compares wall-clock medians within a case.
 
 **iterative_1m**
 
-| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | vs fastest |
-|---|---|---|---|---|---|
-| arx-while | 0.1223 | 0.1209 | 0.0015 | 1.6 | 5.2x |
-| arx-range | 1.3164 | 1.3073 | 0.0433 | 1.7 | 56.0x |
-| c-O0 | 0.0861 | 0.0858 | 0.0007 | 1.5 | 3.7x |
-| c-O2 | 0.0235 | 0.0229 | 0.0004 | 1.5 | 1.0x |
-| python | 0.9460 | 0.9450 | 0.0146 | 9.6 | 40.2x |
+| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | startup (s) | net (s) | vs fastest (wall) |
+|---|---|---|---|---|---|---|---|
+| arx-while | 0.0801 | 0.0763 | 0.0067 | 1.6 | 0.0033 | 0.0767 | 6.7x |
+| arx-range | 0.8819 | 0.8558 | 0.0267 | 1.7 | 0.0033 | 0.8786 | 73.4x |
+| c-O0 | 0.0569 | 0.0553 | 0.0076 | 1.6 | 0.0029 | 0.0540 | 4.7x |
+| c-O0-checked | 0.1377 | 0.1356 | 0.0115 | 1.6 | 0.0029 | 0.1348 | 11.5x |
+| c-O2 | 0.0169 | 0.0156 | 0.0066 | 1.5 | 0.0029 | 0.0140 | 1.4x |
+| c-O2-checked | 0.0120 | 0.0113 | 0.0006 | 1.5 | 0.0029 | 0.0091 | 1.0x |
+| python | 0.6587 | 0.6352 | 0.0199 | 9.8 | 0.0172 | 0.6415 | 54.8x |
+| rust-O0 | 0.0398 | 0.0383 | 0.0079 | 1.8 | 0.0034 | 0.0364 | 3.3x |
+| rust-O0-checked | 0.0646 | 0.0623 | 0.0060 | 1.8 | 0.0034 | 0.0611 | 5.4x |
+| rust-O2 | 0.0184 | 0.0169 | 0.0006 | 1.7 | 0.0032 | 0.0152 | 1.5x |
+| rust-O2-checked | 0.0125 | 0.0116 | 0.0005 | 1.7 | 0.0032 | 0.0093 | 1.0x |
+| go | 0.0198 | 0.0186 | 0.0068 | 4.1 | 0.0038 | 0.0160 | 1.7x |
+| lua | 0.2482 | 0.2389 | 0.0121 | 1.9 | 0.0038 | 0.2444 | 20.7x |
+| java | 0.0563 | 0.0533 | 0.0087 | 40.8 | 0.0385 | 0.0178 | 4.7x |
+| java-checked | 0.0619 | 0.0580 | 0.0029 | 40.9 | 0.0385 | 0.0234 | 5.1x |
+| julia | 0.1713 | 0.1623 | 0.0150 | 208.5 | 0.0974 | 0.0739 | 14.3x |
+| julia-checked | 0.1783 | 0.1672 | 0.0176 | 208.4 | 0.0974 | 0.0809 | 14.8x |
+| numba | 0.4093 | 0.3994 | 0.0179 | 114.8 | 0.1960 | 0.2133 | 34.1x |
 
 **recursive_35**
 
-| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | vs fastest |
-|---|---|---|---|---|---|
-| arx | 0.0937 | 0.0930 | 0.0006 | 1.6 | 1.8x |
-| c-O0 | 0.0853 | 0.0847 | 0.0018 | 1.5 | 1.7x |
-| c-O2 | 0.0507 | 0.0497 | 0.0004 | 1.5 | 1.0x |
-| python | 1.1426 | 1.1387 | 0.0280 | 9.6 | 22.5x |
+| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | startup (s) | net (s) | vs fastest (wall) |
+|---|---|---|---|---|---|---|---|
+| arx | 0.0609 | 0.0603 | 0.0007 | 1.6 | 0.0033 | 0.0575 | 1.8x |
+| c-O0 | 0.0562 | 0.0547 | 0.0020 | 1.6 | 0.0029 | 0.0533 | 1.7x |
+| c-O0-checked | 0.1067 | 0.1037 | 0.0044 | 1.6 | 0.0029 | 0.1038 | 3.2x |
+| c-O2 | 0.0337 | 0.0324 | 0.0011 | 1.5 | 0.0029 | 0.0308 | 1.0x |
+| c-O2-checked | 0.0407 | 0.0401 | 0.0006 | 1.5 | 0.0029 | 0.0378 | 1.2x |
+| python | 0.7455 | 0.7271 | 0.0205 | 9.8 | 0.0172 | 0.7282 | 22.4x |
+| rust-O0 | 0.0562 | 0.0552 | 0.0072 | 1.8 | 0.0034 | 0.0528 | 1.7x |
+| rust-O0-checked | 0.0704 | 0.0697 | 0.0073 | 1.8 | 0.0034 | 0.0670 | 2.1x |
+| rust-O2 | 0.0332 | 0.0326 | 0.0005 | 1.7 | 0.0032 | 0.0301 | 1.0x |
+| rust-O2-checked | 0.0426 | 0.0416 | 0.0063 | 1.7 | 0.0032 | 0.0395 | 1.3x |
+| go | 0.0367 | 0.0358 | 0.0011 | 4.1 | 0.0038 | 0.0329 | 1.1x |
+| lua | 0.5539 | 0.5396 | 0.0178 | 1.9 | 0.0038 | 0.5501 | 16.7x |
+| java | 0.0688 | 0.0664 | 0.0017 | 40.3 | 0.0385 | 0.0304 | 2.1x |
+| java-checked | 0.0751 | 0.0739 | 0.0082 | 40.5 | 0.0385 | 0.0367 | 2.3x |
+| julia | 0.2023 | 0.1901 | 0.0159 | 208.5 | 0.0974 | 0.1049 | 6.1x |
+| julia-checked | 0.2065 | 0.1943 | 0.0212 | 208.3 | 0.0974 | 0.1090 | 6.2x |
+| numba | 0.4366 | 0.4256 | 0.0239 | 114.9 | 0.1960 | 0.2406 | 13.1x |
 
 **recursive_40**
 
-| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | vs fastest |
-|---|---|---|---|---|---|
-| arx | 0.9929 | 0.9905 | 0.0187 | 1.6 | 1.9x |
-| c-O0 | 0.8980 | 0.8976 | 0.0218 | 1.5 | 1.8x |
-| c-O2 | 0.5096 | 0.5085 | 0.0009 | 1.5 | 1.0x |
-| python | 12.6159 | 12.5125 | 0.0849 | 9.7 | 24.8x |
+| implementation | median (s) | min (s) | stddev (s) | memory (MiB) | startup (s) | net (s) | vs fastest (wall) |
+|---|---|---|---|---|---|---|---|
+| arx | 0.6681 | 0.6475 | 0.0158 | 1.6 | 0.0033 | 0.6648 | 2.0x |
+| c-O0 | 0.5918 | 0.5789 | 0.0215 | 1.6 | 0.0029 | 0.5889 | 1.8x |
+| c-O0-checked | 1.1277 | 1.1011 | 0.0321 | 1.6 | 0.0029 | 1.1248 | 3.4x |
+| c-O2 | 0.3339 | 0.3256 | 0.0140 | 1.5 | 0.0029 | 0.3309 | 1.0x |
+| c-O2-checked | 0.4227 | 0.4109 | 0.0185 | 1.5 | 0.0029 | 0.4197 | 1.3x |
+| python | 8.4589 | 8.4465 | 0.0401 | 9.8 | 0.0172 | 8.4417 | 25.3x |
+| rust-O0 | 0.5966 | 0.5754 | 0.0232 | 1.8 | 0.0034 | 0.5932 | 1.8x |
+| rust-O0-checked | 0.7501 | 0.7404 | 0.0311 | 1.8 | 0.0034 | 0.7467 | 2.2x |
+| rust-O2 | 0.3340 | 0.3308 | 0.0204 | 1.7 | 0.0032 | 0.3309 | 1.0x |
+| rust-O2-checked | 0.4179 | 0.4137 | 0.0231 | 1.7 | 0.0032 | 0.4147 | 1.3x |
+| go | 0.3826 | 0.3770 | 0.0187 | 4.1 | 0.0038 | 0.3788 | 1.1x |
+| lua | 6.2422 | 6.2172 | 0.0212 | 1.9 | 0.0038 | 6.2384 | 18.7x |
+| java | 0.3353 | 0.3335 | 0.0051 | 40.2 | 0.0385 | 0.2968 | 1.0x |
+| java-checked | 0.3942 | 0.3921 | 0.0136 | 40.5 | 0.0385 | 0.3557 | 1.2x |
+| julia | 0.6371 | 0.6170 | 0.0325 | 208.4 | 0.0974 | 0.5397 | 1.9x |
+| julia-checked | 0.6485 | 0.6327 | 0.0182 | 208.4 | 0.0974 | 0.5511 | 1.9x |
+| numba | 0.8725 | 0.8646 | 0.0283 | 115.0 | 0.1960 | 0.6765 | 2.6x |
 
 ### Observations
 
 Ratios are computed from the medians above.
 
-- **Recursion:** Arx is 1.1x slower than `c-O0` and 1.9x slower than `c-O2` on both
-  `recursive_35` and `recursive_40`. It is 12.2x (fib 35) and 12.7x (fib 40) faster than CPython.
-- **`arx-while`:** 1.4x slower than `c-O0`, 5.2x slower than `c-O2` and 7.7x faster than CPython.
-- **`arx-range`:** 10.8x slower than `arx-while` and 1.4x slower than CPython, because `range`
+**Recursion (`recursive_40`, lowest noise)**
+
+- Arx is 1.13x slower than `c-O0` and 2.0x slower than `c-O2`. It is 12.7x faster than CPython
+  and 9.3x faster than Lua.
+- `c-O2`, `rust-O2` and `java` are equal within 0.4% (0.334 s to 0.335 s). `go` is 1.15x slower.
+  `julia` (0.637 s) and `numba` (0.873 s) include JIT compilation.
+- Overflow checking costs 1.27x (`c-O2-checked`), 1.25x (`rust-O2-checked`) and 1.18x
+  (`java-checked`) at full optimization, and 1.91x for `c-O0-checked`. Arx, which checks every
+  operation, is 1.7x faster than `c-O0-checked`, 1.1x faster than `rust-O0-checked`, and 1.6x
+  slower than the `-O2` checked builds.
+- `recursive_35` shows the same picture: Arx is 1.08x slower than `c-O0`, 1.81x slower than
+  `c-O2` and 12.2x faster than CPython.
+
+**Loops (`iterative_1m`)**
+
+- `arx-while` is 1.41x slower than `c-O0`, 4.7x slower than `c-O2`, 3.1x faster than Lua and
+  8.2x faster than CPython. It is 1.4x slower than `java`.
+- `arx-range` is 11.0x slower than `arx-while` and 1.34x slower than CPython, because `range`
   allocates a list on every call.
-- **Memory:** peak memory is 1.5-1.7 MiB for Arx and C and 9.6-9.7 MiB for CPython.
+- At `-O2`, the checked C and Rust builds are faster than the unchecked builds (`c-O2-checked`
+  0.0120 s against `c-O2` 0.0169 s; `rust-O2-checked` 0.0125 s against `rust-O2` 0.0184 s). The
+  result repeated across three runs and two compilers. The cause has not been investigated, so
+  it should not be read as "checking is free".
+
+**Start-up and JIT**
+
+- Empty-program start-up is about 3 ms for Arx, C, Rust, Go and Lua, 17 ms for CPython, 39 ms for
+  Java, 97 ms for Julia and 196 ms for Numba. `net` subtracts this, but JIT compilation remains
+  inside `net`.
+
+**Memory**
+
+- Peak resident memory is 1.5-1.8 MiB for Arx, C, Rust and Lua, 4.1 MiB for Go, 9.8 MiB for
+  CPython, about 40 MiB for Java, about 115 MiB for Numba and about 208 MiB for Julia.
+
+**Noise**
+
+- `recursive_*` rows are mostly under 5% coefficient of variation. Some `iterative_1m` rows
+  between 15 ms and 60 ms show 15-40% because of single outlier runs (for example `c-O2`: min
+  15.6 ms, max 53 ms), so compare medians there. Start-up baselines of 3 ms show 9-22% on
+  sub-millisecond absolute spread.
