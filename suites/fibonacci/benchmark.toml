@@ -17,8 +17,8 @@ id = "recursive_35"
 args = ["recursive"]
 input = "35"
 expected = "9227465"
-runs = 10
-warmup = 2
+runs = 30
+warmup = 5
 [case.arx]
 arx = "arx/recursive.x"
 
@@ -37,8 +37,8 @@ id = "iterative_1m"
 args = ["iterative"]
 input = "1000000"
 expected = "16423387200000"
-runs = 10
-warmup = 2
+runs = 30
+warmup = 5
 [case.arx]
 arx-while = "arx/iterative_while.x"
 arx-range = "arx/iterative_range.x"
