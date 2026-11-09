@@ -368,8 +368,15 @@ def cmd_run(args) -> None:
     verify_baseline(base_cmds)
     env = environment(langs)
     base = BUILD / "quick-results" if args.quick else RESULTS
-    outdir = base / f"{env['timestamp_utc']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx'] or 'none'}"
-    outdir.mkdir(parents=True, exist_ok=False)  # never overwrite an earlier run
+    name = f"{env['timestamp_utc']}_{platform.system().lower()}-{platform.machine()}_arx-{env['arx'] or 'none'}"
+    final = base / name
+    if final.exists():
+        sys.exit(f"{final} already exists; refusing to overwrite an earlier run")
+    base.mkdir(parents=True, exist_ok=True)
+    outdir = base / f".{name}.partial"  # hidden until the run completes
+    if outdir.exists():
+        shutil.rmtree(outdir)
+    outdir.mkdir()
     (outdir / "environment.json").write_text(json.dumps(env, indent=2) + "\n")
 
     print("\n== baseline (empty programs) ==", flush=True)
@@ -382,7 +389,18 @@ def cmd_run(args) -> None:
         runs, warmup = (3, 1) if args.quick else (case.get("runs", 10), case.get("warmup", 2))
         print(f"\n== {suite['dir'].name}/{case['id']} ==", flush=True)
         hyperfine(cmds, runs, warmup, sdir / f"{case['id']}.json", case_dir(suite, case))
-    print(f"\nresults written to {outdir}")
+    marker = {
+        "schema_version": 1,
+        "status": "complete",
+        "finished_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ"),
+        "timestamp_utc": env["timestamp_utc"],
+        "cases": [f"{suite['dir'].name}/{case['id']}" for suite, case, _ in prepared],
+        "labels": sorted({label for _, _, cmds in prepared for label in cmds}),
+        "quick": bool(args.quick),
+    }
+    (outdir / "complete.json").write_text(json.dumps(marker, indent=2) + "\n")
+    outdir.rename(final)
+    print(f"\nresults written to {final}")
 
 
 def parse_row(r: dict) -> tuple:
@@ -397,15 +415,47 @@ def parse_row(r: dict) -> tuple:
     mib = mem / (1024 * 1024) if isinstance(mem, (int, float)) else None
     return name, med, mn, sd, mib
 
+def run_timestamp(d: Path) -> str:
+    """Sortable UTC timestamp of a run, taken from its recorded data, not its directory name."""
+    for fname, key in (("complete.json", "timestamp_utc"), ("environment.json", "timestamp_utc")):
+        f = d / fname
+        if f.exists():
+            try:
+                v = json.loads(f.read_text()).get(key)
+            except json.JSONDecodeError:
+                v = None
+            if v:
+                return v
+    env = d / "environment.json"
+    if env.exists():  # runs made before timestamps were recorded only have a date
+        date = json.loads(env.read_text()).get("date", "")
+        return f"{date}T000000Z" if date else ""
+    return ""
+
+
+def is_complete(d: Path) -> bool:
+    """A run is complete only if it has a completion marker with status "complete"."""
+    if not (d / "environment.json").exists() or d.name.startswith("."):
+        return False
+    marker = d / "complete.json"
+    if marker.exists():
+        try:
+            return json.loads(marker.read_text()).get("status") == "complete"
+        except json.JSONDecodeError:
+            return False
+    return False
+
 
 def cmd_report(args) -> None:
     if args.dir:
         d = Path(args.dir)
     else:
-        runs = sorted(p for p in RESULTS.glob("*") if (p / "environment.json").exists())
+        runs = [p for p in RESULTS.glob("*") if is_complete(p)]
         if not runs:
-            sys.exit("no results found")
-        d = runs[-1]
+            sys.exit("no complete results found")
+        d = max(runs, key=run_timestamp)
+    if not is_complete(d):
+        sys.exit(f"{d} is not a complete run (no complete.json); refusing to report it")
     env = json.loads((d / "environment.json").read_text())
     langs = env.get("languages")
     extra = " | " + ", ".join(f"{k}: {v}" for k, v in langs.items()) if langs else ""
