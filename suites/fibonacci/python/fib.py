@@ -12,10 +12,14 @@ def fib_iter(n):
     return a
 
 
+def iterative(n):
+    total = 0
+    for k in range(n):
+        total += fib_iter(30 + k % 10)
+    return total
+
+
 mode = sys.argv[1]
 with open("input.txt") as f:
     n = int(f.read())
-if mode == "recursive":
-    print(fib_recursive(n))
-else:
-    print(sum(fib_iter(30 + k % 10) for k in range(n)))
+print(fib_recursive(n) if mode == "recursive" else iterative(n))
