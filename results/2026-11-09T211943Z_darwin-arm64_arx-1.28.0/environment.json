@@ -1,0 +1,28 @@
+{
+  "date": "2026-11-09",
+  "timestamp_utc": "2026-11-09T211943Z",
+  "arx": "1.28.0",
+  "arx_commit": "fbd98b77",
+  "arx_path": "/Users/krishnasingh/mamba/envs/arx/bin/arx",
+  "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "clang_path": "/tmp/applecc/clang",
+  "languages": {
+    "arx": "1.28.0",
+    "c": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+    "python": "Python 3.14.10",
+    "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Homebrew)",
+    "go": "go version go1.27.3 darwin/arm64",
+    "lua": "Lua 5.5.1  Copyright (C) 1994-2026 Lua.org, PUC-Rio",
+    "java": "java version \"25.0.1\" 2025-10-21 LTS",
+    "julia": "julia version 1.13.3",
+    "numba": "numba 0.68.1 (Python 3.14.10)"
+  },
+  "hyperfine": "hyperfine 2.0.0",
+  "python": "3.14.10",
+  "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "Apple M1",
+  "cpu_count": 8,
+  "harness_commit": "6dfae7d",
+  "harness_dirty": false
+}

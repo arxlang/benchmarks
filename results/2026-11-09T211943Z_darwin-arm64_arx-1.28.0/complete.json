@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "finished_utc": "2026-11-09T212547Z",
+  "timestamp_utc": "2026-11-09T211943Z",
+  "cases": [
+    "fibonacci/recursive_35",
+    "fibonacci/recursive_40",
+    "fibonacci/iterative_1m"
+  ],
+  "labels": [
+    "arx",
+    "arx-range",
+    "arx-while",
+    "c-O0",
+    "c-O0-checked",
+    "c-O2",
+    "c-O2-checked",
+    "go",
+    "java",
+    "java-checked",
+    "julia",
+    "julia-checked",
+    "lua",
+    "numba",
+    "python",
+    "rust-O0",
+    "rust-O0-checked",
+    "rust-O2",
+    "rust-O2-checked"
+  ],
+  "quick": false
+}
