@@ -8,11 +8,11 @@ fn fib_while(n: i64) -> i64:
   title: fib_while
   summary: Returns the n-th Fibonacci number using a while loop.
   ```
-  var a: i64 = 0
-  var b: i64 = 1
-  var i: i64 = 0
+  a: i64 = 0
+  b: i64 = 1
+  i: i64 = 0
   while i < n:
-    var temp: i64 = a
+    temp: i64 = a
     a = b
     b = temp + b
     i = i + 1
@@ -23,12 +23,12 @@ fn main() -> i32:
   title: main
   summary: Reads the call count from input.txt, prints the checksum and returns success.
   ```
-  var f: File = open("input.txt")
-  var text: str = f.read()
+  f: File = open("input.txt")
+  text: str = f.read()
   f.close()
-  var count: i64 = int(text)
-  var total: i64 = 0
-  var k: i64 = 0
+  count: i64 = int(text)
+  total: i64 = 0
+  k: i64 = 0
   while k < count:
     total = total + fib_while(30 + (k - (k / 10) * 10))
     k = k + 1

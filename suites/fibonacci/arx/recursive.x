@@ -17,9 +17,9 @@ fn main() -> i32:
   title: main
   summary: Reads n from input.txt, prints fib(n) and returns success.
   ```
-  var f: File = open("input.txt")
-  var text: str = f.read()
+  f: File = open("input.txt")
+  text: str = f.read()
   f.close()
-  var n: i64 = int(text)
+  n: i64 = int(text)
   print(fib_recursive(n))
   return 0
