@@ -116,6 +116,19 @@ arx = "arx/small.x"
 Every implementation should read its size from `input.txt`, use the same algorithm and loop
 structure, and avoid library shortcuts.
 
+## Tests
+
+Run the harness smoke tests from the repository root:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The suite uses only the Python standard library and a temporary directory; no language toolchains
+are required. End-to-end `run` tests execute when `hyperfine` is on `PATH` and are skipped
+otherwise. Set `REQUIRE_HYPERFINE=1` (as in CI) to fail instead of skipping when `hyperfine` is
+missing.
+
 ## License
 
 BSD-3-Clause, see [LICENSE](LICENSE).
