@@ -116,6 +116,25 @@ arx = "arx/small.x"
 Every implementation should read its size from `input.txt`, use the same algorithm and loop
 structure, and avoid library shortcuts.
 
+## Linux CI benchmarks
+
+The [Linux benchmark workflow](.github/workflows/bench.yaml) runs manually or weekly on Sunday at
+04:00 UTC. The manual trigger provides `quick` for fast workflow testing and `arx_spec` for selecting
+the pip install specification of `arxlang`. Quick runs write to `build/quick-results`; normal scheduled
+runs use the harness's `--ci` counts and write to `results/`.
+
+Arx and C share the `arx-c` runner so their measurements come from the same host and can support
+like-for-like ratios. The other languages run in separate matrix jobs. Results from separate jobs
+should not be compared as if they ran on one identical machine.
+
+Shared runners have roughly 10–30% run-to-run timing noise. Use CI numbers for trends and
+same-runner ratios, never absolute seconds. Download a `bench-*` artifact, unzip it, and inspect
+the completed run locally:
+
+```bash
+python3 harness/bench.py report /path/to/downloaded/run
+```
+
 ## Tests
 
 Run the harness smoke tests from the repository root:

@@ -19,6 +19,9 @@ input = "35"
 expected = "9227465"
 runs = 30
 warmup = 5
+[case.ci]
+runs = 3
+warmup = 1
 [case.arx]
 arx = "arx/recursive.x"
 
@@ -28,6 +31,9 @@ args = ["recursive"]
 input = "40"
 expected = "102334155"
 runs = 5
+warmup = 1
+[case.ci]
+runs = 2
 warmup = 1
 [case.arx]
 arx = "arx/recursive.x"
@@ -39,6 +45,9 @@ input = "1000000"
 expected = "16423387200000"
 runs = 30
 warmup = 5
+[case.ci]
+runs = 3
+warmup = 1
 [case.arx]
 arx-while = "arx/iterative_while.x"
 arx-range = "arx/iterative_range.x"

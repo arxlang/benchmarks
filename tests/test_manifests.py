@@ -37,6 +37,19 @@ class ManifestTests(unittest.TestCase):
                     self.assertIsInstance(warmup, int)
                     self.assertNotIsInstance(warmup, bool)
                     self.assertGreaterEqual(warmup, 0)
+                    if "ci" in case:
+                        ci = case["ci"]
+                        self.assertIsInstance(ci, dict)
+                        if "runs" in ci:
+                            ci_runs = ci["runs"]
+                            self.assertIsInstance(ci_runs, int)
+                            self.assertNotIsInstance(ci_runs, bool)
+                            self.assertGreaterEqual(ci_runs, 1)
+                        if "warmup" in ci:
+                            ci_warmup = ci["warmup"]
+                            self.assertIsInstance(ci_warmup, int)
+                            self.assertNotIsInstance(ci_warmup, bool)
+                            self.assertGreaterEqual(ci_warmup, 0)
                     ids.append(case["id"])
                     for source in case.get("arx", {}).values():
                         self.assertTrue((manifest.parent / source).is_file())
@@ -93,3 +106,34 @@ class ManifestTests(unittest.TestCase):
             self.assertNotIn("runs", plan[0][1])
             self.assertNotIn("warmup", plan[0][1])
             self.assertEqual(plan[1][1]["warmup"], 0)
+
+    def test_optional_ci_fields_follow_harness_defaults(self):
+        """Prevents CI run overrides from requiring local runs or warmup fields."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite = root / "ci-defaults"
+            suite.mkdir()
+            (suite / "benchmark.toml").write_text(
+                'name = "ci defaults"\n'
+                "\n"
+                "[[case]]\n"
+                'id = "implicit-ci"\n'
+                'expected = "ok"\n'
+                "\n"
+                "[[case]]\n"
+                'id = "zero-ci-warmup"\n'
+                'expected = "ok"\n'
+                "runs = 20\n"
+                "warmup = 4\n"
+                "[case.ci]\n"
+                "runs = 2\n"
+                "warmup = 0\n"
+            )
+            with patch.object(bench, "SUITES", root):
+                suites = bench.load_suites(["ci-defaults"])
+                plan = bench.select(suites, None)
+
+            implicit = plan[0][1]
+            override = plan[1][1]
+            self.assertEqual(bench.resolve_run_counts(implicit, ci=True), (10, 2))
+            self.assertEqual(bench.resolve_run_counts(override, ci=True), (2, 0))
