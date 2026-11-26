@@ -70,12 +70,13 @@ jobs:
 
       - name: Install Arx and clang
         if: matrix.name == 'arx-c'
+        env:
+          ARX_SPEC: ${{ inputs.arx_spec || 'arxlang==1.28.0' }}
         run: |
           sudo apt-get install -y clang
-          python -m pip install "${{ inputs.arx_spec || 'arxlang==1.28.0' }}"
+          python -m pip install "$ARX_SPEC"
           arx --version
           clang --version
-          echo "BENCH_ARX_INSTALL=${{ inputs.arx_spec || 'arxlang==1.28.0' }}" >> "$GITHUB_ENV"
 
       - name: Verify Rust
         if: matrix.name == 'rust'
@@ -116,9 +117,12 @@ jobs:
         run: python3 harness/bench.py check --lang "${{ matrix.langs }}"
 
       - name: Run benchmarks
+        env:
+          QUICK: ${{ inputs.quick || false }}
+          BENCH_ARX_INSTALL: ${{ matrix.name == 'arx-c' && (inputs.arx_spec || 'arxlang==1.28.0') || '' }}
         run: |
           set -o pipefail
-          if [ "${{ inputs.quick == true }}" = "true" ]; then
+          if [ "$QUICK" = "true" ]; then
             python3 harness/bench.py run --quick --lang "${{ matrix.langs }}" 2>&1 | tee /tmp/bench-output.log
           else
             python3 harness/bench.py run --ci --lang "${{ matrix.langs }}" 2>&1 | tee /tmp/bench-output.log

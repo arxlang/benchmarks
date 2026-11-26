@@ -27,8 +27,9 @@ python3 harness/bench.py report              # markdown tables from the latest c
 - `clang` and `arx` on `PATH`. Arx >= 1.28.0 is required: the `.x` sources use the declaration
   syntax introduced in that release (`name: T = value`), and earlier releases do not parse it.
 - Per-language toolchains: `rustc`, `go`, `lua`, `javac` and `java`, `julia`, and a Python with
-  Numba (set `NUMBA_PYTHON` to its interpreter; default `~/.venvs/numba/bin/python`). Languages whose
-  tools are missing are skipped; `--lang a,b` selects languages explicitly.
+  Numba (set `NUMBA_PYTHON` to its interpreter; by default the harness uses `sys.executable`,
+  falling back to `python3` if unavailable). Languages whose tools are missing are skipped;
+  `--lang a,b` selects languages explicitly.
 - Optional: `ARX_REPO=/path/to/arx` records the Arx git commit in the results
 
 On macOS, put Apple's `/usr/bin/clang` first on `PATH`. In testing, a conda-provided clang failed
