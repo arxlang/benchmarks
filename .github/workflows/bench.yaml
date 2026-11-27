@@ -9,8 +9,8 @@ on:
         description: "Use --quick for fast workflow testing"
       arx_spec:
         type: string
-        default: "arxlang==1.28.0"
-        description: "pip install spec for arxlang"
+        default: ""
+        description: "Optional pip install override for arxlang; blank uses the version pinned in conda.yaml"
   schedule:
     - cron: "0 4 * * 0"
 
@@ -26,6 +26,9 @@ jobs:
     name: benchmark (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -el {0}
     strategy:
       fail-fast: false
       matrix:
@@ -50,9 +53,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: "3.12"
+          miniconda-version: "latest"
+          environment-file: conda.yaml
+          channels: conda-forge,nodefaults
+          activate-environment: arx-benchmarks
+          auto-update-conda: true
+          conda-solver: libmamba
 
       - name: Install hyperfine
         run: |
@@ -71,10 +79,12 @@ jobs:
       - name: Install Arx and clang
         if: matrix.name == 'arx-c'
         env:
-          ARX_SPEC: ${{ inputs.arx_spec || 'arxlang==1.28.0' }}
+          ARX_SPEC: ${{ inputs.arx_spec }}
         run: |
           sudo apt-get install -y clang
-          python -m pip install "$ARX_SPEC"
+          if [ -n "$ARX_SPEC" ]; then
+            python -m pip install --upgrade "$ARX_SPEC"
+          fi
           arx --version
           clang --version
 
@@ -106,12 +116,9 @@ jobs:
         if: matrix.name == 'julia'
         uses: julia-actions/setup-julia@v2
 
-      - name: Install Numba
+      - name: Verify Numba
         if: matrix.name == 'numba'
-        run: |
-          python -m pip install numba
-          echo "NUMBA_PYTHON=$(which python3)" >> "$GITHUB_ENV"
-          python -c "import sys, numba; print('numba', numba.__version__, '(Python', sys.version.split()[0] + ')')"
+        run: python -c "import sys, numba; print('numba', numba.__version__, '(Python', sys.version.split()[0] + ')')"
 
       - name: Run verification
         run: python3 harness/bench.py check --lang "${{ matrix.langs }}"
@@ -119,9 +126,23 @@ jobs:
       - name: Run benchmarks
         env:
           QUICK: ${{ inputs.quick || false }}
-          BENCH_ARX_INSTALL: ${{ matrix.name == 'arx-c' && (inputs.arx_spec || 'arxlang==1.28.0') || '' }}
+          ARX_SPEC: ${{ inputs.arx_spec }}
+          IS_ARX_C: ${{ matrix.name == 'arx-c' }}
+          BENCH_ARX_INSTALL: ""
         run: |
           set -o pipefail
+          if [ "$IS_ARX_C" = "true" ]; then
+            if [ -n "$ARX_SPEC" ]; then
+              export BENCH_ARX_INSTALL="$ARX_SPEC"
+            else
+              BENCH_ARX_INSTALL=$(sed -nE 's/^[[:space:]]*-[[:space:]]*(arxlang==[^[:space:]]+).*$/\1/p' conda.yaml | head -n 1)
+              if [ -z "$BENCH_ARX_INSTALL" ]; then
+                echo "Could not determine the pinned arxlang spec from conda.yaml"
+                exit 1
+              fi
+              export BENCH_ARX_INSTALL
+            fi
+          fi
           if [ "$QUICK" = "true" ]; then
             python3 harness/bench.py run --quick --lang "${{ matrix.langs }}" 2>&1 | tee /tmp/bench-output.log
           else

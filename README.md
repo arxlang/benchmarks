@@ -13,22 +13,36 @@ executables with [hyperfine](https://github.com/sharkdp/hyperfine).
 
 ## Quick start
 
+Create and activate the checked-in Conda environment for a consistent local setup:
+
 ```bash
-python3 harness/bench.py list
-python3 harness/bench.py check fibonacci     # build and verify outputs
-python3 harness/bench.py run fibonacci       # verify, then time
-python3 harness/bench.py report              # markdown tables from the latest complete run
+mamba env create --file conda.yaml
+# or: conda env create --file conda.yaml
+conda activate arx-benchmarks
+```
+
+The environment pins Python, Arx, and Numba. Install [hyperfine](https://github.com/sharkdp/hyperfine)
+and any language toolchains you want to benchmark separately.
+
+```bash
+python harness/bench.py list
+python harness/bench.py check fibonacci     # build and verify outputs
+python harness/bench.py run fibonacci       # verify, then time
+python harness/bench.py report              # markdown tables from the latest complete run
 ```
 
 ## Requirements
 
-- Python >= 3.11 (the harness uses `tomllib`)
+- Recommended: the checked-in Conda environment, which pins Python 3.12, `arxlang==1.30.0`,
+  and `numba==0.68.1`. The harness requires Python >= 3.11 for `tomllib`.
 - [hyperfine](https://github.com/sharkdp/hyperfine) (tested with 2.0.0)
-- `clang` and `arx` on `PATH`. Arx >= 1.28.0 is required: the `.x` sources use the declaration
-  syntax introduced in that release (`name: T = value`), and earlier releases do not parse it.
-- Per-language toolchains: `rustc`, `go`, `lua`, `javac` and `java`, `julia`, and a Python with
-  Numba (set `NUMBA_PYTHON` to its interpreter; by default the harness uses `sys.executable`,
-  falling back to `python3` if unavailable). Languages whose tools are missing are skipped;
+- `clang` and `arx` on `PATH`. The Conda environment provides Arx 1.30.0 by default; an optional
+  `arx_spec` workflow input can install a different pip specification. Arx >= 1.28.0 is required:
+  the `.x` sources use the declaration syntax introduced in that release (`name: T = value`).
+- Per-language toolchains: `rustc`, `go`, `lua`, `javac` and `java`, `julia`. Numba is installed
+  in the Conda environment; set `NUMBA_PYTHON` only to override its interpreter. By default the
+  harness uses `sys.executable`, falling back to `python3` if unavailable. Languages whose tools
+  are missing are skipped;
   `--lang a,b` selects languages explicitly.
 - Optional: `ARX_REPO=/path/to/arx` records the Arx git commit in the results
 
@@ -120,9 +134,10 @@ structure, and avoid library shortcuts.
 ## Linux CI benchmarks
 
 The [Linux benchmark workflow](.github/workflows/bench.yaml) runs manually or weekly on Sunday at
-04:00 UTC. The manual trigger provides `quick` for fast workflow testing and `arx_spec` for selecting
-the pip install specification of `arxlang`. Quick runs write to `build/quick-results`; normal scheduled
-runs use the harness's `--ci` counts and write to `results/`.
+04:00 UTC. It uses the checked-in `conda.yaml` environment, including pinned Python 3.12, Arx 1.30.0,
+and Numba 0.68.1. The manual trigger provides `quick` for fast workflow testing and an optional
+`arx_spec` pip-install override; when blank, the pinned Arx version is used. Quick runs write to
+`build/quick-results`; normal scheduled runs use the harness's `--ci` counts and write to `results/`.
 
 Arx and C share the `arx-c` runner so their measurements come from the same host and can support
 like-for-like ratios. The other languages run in separate matrix jobs. Results from separate jobs
@@ -133,7 +148,7 @@ same-runner ratios, never absolute seconds. Download a `bench-*` artifact, unzip
 the completed run locally:
 
 ```bash
-python3 harness/bench.py report /path/to/downloaded/run
+python harness/bench.py report /path/to/downloaded/run
 ```
 
 ## Tests
