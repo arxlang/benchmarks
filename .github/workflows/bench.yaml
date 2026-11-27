@@ -1,0 +1,163 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      quick:
+        type: boolean
+        default: false
+        description: "Use --quick for fast workflow testing"
+      arx_spec:
+        type: string
+        default: ""
+        description: "Optional pip install override for arxlang; blank uses the version pinned in conda.yaml"
+  schedule:
+    - cron: "0 4 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: benchmark (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -el {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arx-c
+            langs: "arx,c"
+          - name: rust
+            langs: "rust"
+          - name: go
+            langs: "go"
+          - name: lua
+            langs: "lua"
+          - name: java
+            langs: "java"
+          - name: julia
+            langs: "julia"
+          - name: numba
+            langs: "numba"
+          - name: python
+            langs: "python"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: "latest"
+          environment-file: conda.yaml
+          channels: conda-forge,nodefaults
+          activate-environment: arx-benchmarks
+          auto-update-conda: true
+          conda-solver: libmamba
+
+      - name: Install hyperfine
+        run: |
+          for attempt in 1 2 3; do
+            if sudo apt-get update; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          sudo apt-get install -y hyperfine
+          hyperfine --version
+
+      - name: Install Arx and clang
+        if: matrix.name == 'arx-c'
+        env:
+          ARX_SPEC: ${{ inputs.arx_spec }}
+        run: |
+          sudo apt-get install -y clang
+          if [ -n "$ARX_SPEC" ]; then
+            python -m pip install --upgrade "$ARX_SPEC"
+          fi
+          arx --version
+          clang --version
+
+      - name: Verify Rust
+        if: matrix.name == 'rust'
+        run: rustc --version
+
+      - name: Set up Go
+        if: matrix.name == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Install Lua
+        if: matrix.name == 'lua'
+        run: |
+          sudo apt-get install -y lua5.4
+          sudo ln -sf /usr/bin/lua5.4 /usr/local/bin/lua
+          lua -v
+
+      - name: Set up Java
+        if: matrix.name == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Julia
+        if: matrix.name == 'julia'
+        uses: julia-actions/setup-julia@v2
+
+      - name: Verify Numba
+        if: matrix.name == 'numba'
+        run: python -c "import sys, numba; print('numba', numba.__version__, '(Python', sys.version.split()[0] + ')')"
+
+      - name: Run verification
+        run: python3 harness/bench.py check --lang "${{ matrix.langs }}"
+
+      - name: Run benchmarks
+        env:
+          QUICK: ${{ inputs.quick || false }}
+          ARX_SPEC: ${{ inputs.arx_spec }}
+          IS_ARX_C: ${{ matrix.name == 'arx-c' }}
+          BENCH_ARX_INSTALL: ""
+        run: |
+          set -o pipefail
+          if [ "$IS_ARX_C" = "true" ]; then
+            if [ -n "$ARX_SPEC" ]; then
+              export BENCH_ARX_INSTALL="$ARX_SPEC"
+            else
+              BENCH_ARX_INSTALL=$(sed -nE 's/^[[:space:]]*-[[:space:]]*(arxlang==[^[:space:]]+).*$/\1/p' conda.yaml | head -n 1)
+              if [ -z "$BENCH_ARX_INSTALL" ]; then
+                echo "Could not determine the pinned arxlang spec from conda.yaml"
+                exit 1
+              fi
+              export BENCH_ARX_INSTALL
+            fi
+          fi
+          if [ "$QUICK" = "true" ]; then
+            python3 harness/bench.py run --quick --lang "${{ matrix.langs }}" 2>&1 | tee /tmp/bench-output.log
+          else
+            python3 harness/bench.py run --ci --lang "${{ matrix.langs }}" 2>&1 | tee /tmp/bench-output.log
+          fi
+          run_dir=$(sed -n 's/^results written to //p' /tmp/bench-output.log | tail -n 1)
+          if [ -z "$run_dir" ]; then
+            echo "Could not determine benchmark results directory"
+            exit 1
+          fi
+          echo "BENCH_RESULTS_DIR=$run_dir" >> "$GITHUB_ENV"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.name }}
+          path: ${{ env.BENCH_RESULTS_DIR }}
+          if-no-files-found: error

@@ -3,7 +3,7 @@
 
   python3 harness/bench.py list
   python3 harness/bench.py check  [SUITE ...] [--case ID] [--lang L,L]
-  python3 harness/bench.py run    [SUITE ...] [--case ID] [--lang L,L] [--quick]
+  python3 harness/bench.py run    [SUITE ...] [--case ID] [--lang L,L] [--quick] [--ci]
   python3 harness/bench.py report [RESULTS_DIR]
 
 A suite is a folder in suites/ containing benchmark.toml. Languages are defined in the LANGS
@@ -34,7 +34,16 @@ RESULTS = ROOT / "results"
 BASELINES = ROOT / "harness" / "baselines"
 C_OPT_LEVELS = ("O0", "O2")
 RUST_OPT_LEVELS = ("0", "2")
-NUMBA_PY = os.environ.get("NUMBA_PYTHON", str(Path.home() / ".venvs" / "numba" / "bin" / "python"))
+def resolve_numba_python() -> str:
+    explicit = os.environ.get("NUMBA_PYTHON", "").strip()
+    if explicit:
+        return explicit
+    if getattr(sys, "executable", ""):
+        return sys.executable
+    return shutil.which("python3") or "python3"
+
+
+NUMBA_PY = resolve_numba_python()
 
 _built: set = set()
 
@@ -252,6 +261,21 @@ def prepare(plan: list, langs: dict) -> list:
     return prepared
 
 
+def resolve_run_counts(case: dict, ci: bool = False, quick: bool = False) -> tuple[int, int]:
+    """Resolve benchmark run and warmup counts, with quick taking precedence."""
+    if quick:
+        return 3, 1
+    if ci:
+        overrides = case.get("ci", {})
+        if not isinstance(overrides, dict):
+            overrides = {}
+        return (
+            overrides.get("runs", case.get("runs", 10)),
+            overrides.get("warmup", case.get("warmup", 2)),
+        )
+    return case.get("runs", 10), case.get("warmup", 2)
+
+
 def verify(suite: dict, case: dict, cmds: dict) -> None:
     # Also serves as the first launch of each fresh binary (macOS checks new executables).
     cwd = case_dir(suite, case)
@@ -292,27 +316,42 @@ def verify_baseline(cmds: dict) -> None:
 
 
 # ----------------------------------------------------------------------------- environment
+def _cpu_model_from_text(text: str) -> str:
+    for line in text.splitlines():
+        if line.lower().startswith("model name"):
+            name = line.split(":", 1)[1].strip()
+            if name:
+                return name
+    return ""
+
+
 def cpu_name() -> str:
     if sys.platform == "darwin":
         return sh(["sysctl", "-n", "machdep.cpu.brand_string"])
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor()
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/cpuinfo") as cpuinfo:
+                model = _cpu_model_from_text(cpuinfo.read())
+                if model:
+                    return model
+        except OSError:
+            pass
+        model = _cpu_model_from_text(sh(["lscpu"]))
+        if model:
+            return model
+    return platform.processor().strip() or platform.machine().strip()
 
 
 def environment(langs: dict) -> dict:
     arx_repo = os.environ.get("ARX_REPO")
+    arx_install = os.environ.get("BENCH_ARX_INSTALL", "").strip()
     clang_version = sh(["clang", "--version"]).splitlines()
     now = datetime.now(timezone.utc)
     versions = {}
     for name, lang in langs.items():
         lines = sh(list(lang.version_cmd)).splitlines()
         versions[name] = lines[0] if lines else ""
-    return {
+    env = {
         "date": now.date().isoformat(),
         "timestamp_utc": now.strftime("%Y-%m-%dT%H%M%SZ"),
         "arx": sh(["arx", "--version"]),
@@ -330,6 +369,9 @@ def environment(langs: dict) -> dict:
         "harness_commit": sh(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"]),
         "harness_dirty": bool(sh(["git", "-C", str(ROOT), "status", "--porcelain"])),
     }
+    if arx_install:
+        env["arx_install"] = arx_install
+    return env
 
 
 # ----------------------------------------------------------------------------- commands
@@ -387,7 +429,7 @@ def cmd_run(args) -> None:
         verify(suite, case, cmds)
         sdir = outdir / suite["dir"].name
         sdir.mkdir(exist_ok=True)
-        runs, warmup = (3, 1) if args.quick else (case.get("runs", 10), case.get("warmup", 2))
+        runs, warmup = resolve_run_counts(case, ci=getattr(args, "ci", False), quick=args.quick)
         print(f"\n== {suite['dir'].name}/{case['id']} ==", flush=True)
         hyperfine(cmds, runs, warmup, sdir / f"{case['id']}.json", case_dir(suite, case))
     marker = {
@@ -510,6 +552,7 @@ def main() -> None:
         s.add_argument("--lang", help="comma-separated languages (default: all installed)")
         if name == "run":
             s.add_argument("--quick", action="store_true", help="3 runs, 1 warm-up; writes to build/quick-results")
+            s.add_argument("--ci", action="store_true", help="use optional CI runs and warmup overrides")
         s.set_defaults(fn=fn)
     r = sub.add_parser("report")
     r.add_argument("dir", nargs="?")
